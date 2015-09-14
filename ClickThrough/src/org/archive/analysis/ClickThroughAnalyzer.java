@@ -58,7 +58,7 @@ public class ClickThroughAnalyzer {
 	//for session segmentation, i.e., 30 minutes
 	private static final int SessionSegmentationThreshold = 30;
 	//unique files: AOL, SogouQ2008, SogouQ2012
-	//for id access, and id starts from "1"
+	//for id access, and id starts from "1"_
 	private static Hashtable<String, Integer> UniqueQTextTable = null;
 	private static Hashtable<String, Integer> UniqueUserIDTable = null;
 	private static Hashtable<String, Integer> UniqueClickUrlTable = null;
@@ -68,9 +68,6 @@ public class ClickThroughAnalyzer {
 	private static ArrayList<StrInt> UniqueUserIDList = null;
 	private static ArrayList<IntStrInt> UniqueClickUrlList = null;
 	private static ArrayList<IntStrInt> UniqueWordList = null;
-	
-	
-	
 	
 	//
 	//query-document bipartite graph, records click information between clicked documents and queries
@@ -2134,17 +2131,18 @@ public class ClickThroughAnalyzer {
 	//unique queries within sessions that include clicks
 	private static void getStatistics(int atLeastClickNum){
 		try {
-			String rawDataFile = "E:/Tao_CICEE/MSRA/DataPackage/D2/OrganicSearchPart_Raw_Week/OrganicSearchPart_Raw_Week.txt";
+			//String rawDataFile = "E:/Tao_CICEE/MSRA/DataPackage/D2/OrganicSearchPart_Raw_Week/OrganicSearchPart_Raw_Week.txt";
+			String rawDataFile = "../../../WorkBench/Corpus/DataSource_Raw/OrganicSearchPart_Raw_Week/OrganicSearchPart_Raw_Week.txt";
 			//FilteredBingOrganicSearchLog_AtLeast_2Click
-			String outputPath = "C:/T/WorkBench/Corpus/DataSource_Analyzed/FilteredBingOrganicSearchLog_AtLeast_"+Integer.toString(atLeastClickNum)+"Click/";
+			String outputPath =  "../../../WorkBench/Corpus/DataSource_Analyzed/WeekOrganicLog/AtLeast_"+Integer.toString(atLeastClickNum)+"Clicks/";
 			
-			String acceptedSessionFile = outputPath+"AcceptedSessionData.txt";
+			String acceptedSessionFile = outputPath+"AcceptedSessionData_AtLeast_"+Integer.toString(atLeastClickNum)+"Clicks.txt";
 			BufferedWriter acceptedSessionWriter = IOText.getBufferedWriter_UTF8(acceptedSessionFile);
 			
-			String uniqueQFile = outputPath+"UniqueQueryInSessionsWithClicks.txt";
+			String uniqueQFile = outputPath+"UniqueQueryInSessions_AtLeast_"+Integer.toString(atLeastClickNum)+"Clicks.txt";
 			BufferedWriter uniqueQWriter = IOText.getBufferedWriter_UTF8(uniqueQFile);
 			
-			String uniqueUrlFile = outputPath+"UniqueUrlInSessionsWithClicks.txt";
+			String uniqueUrlFile = outputPath+"UniqueUrlInSessions_AtLeast_"+Integer.toString(atLeastClickNum)+"Clicks.txt";
 			BufferedWriter uniqueUrlWriter = IOText.getBufferedWriter_UTF8(uniqueUrlFile);
 
 			//corresponding to click numbers of 1,2,3,4,5
@@ -2641,7 +2639,7 @@ public class ClickThroughAnalyzer {
 		//ClickThroughAnalyzer.loadSearchLog(file);
 		
 		//3
-		ClickThroughAnalyzer.getUrlListOfTop100Sessions();
+		//ClickThroughAnalyzer.getUrlListOfTop100Sessions();
 		
 		//4
 		//ClickThroughAnalyzer.splitUrlList();
