@@ -47,6 +47,10 @@ public final class SimpleAnalyzer_Var extends Analyzer {
     this.matchVersion = matchVersion;
   }
   
+  public SimpleAnalyzer_Var(){
+	  this.matchVersion = Version.LUCENE_CURRENT;
+  }
+  
   @Override
   protected TokenStreamComponents createComponents(final String fieldName,
       final Reader reader) {
