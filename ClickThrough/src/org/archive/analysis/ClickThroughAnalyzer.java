@@ -16,8 +16,11 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
+import java.util.Random;
 import java.util.Vector;
 import java.util.Map.Entry;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.lucene.analysis.tokenattributes.FlagsAttributeImpl;
 import org.apache.lucene.util.Version;
@@ -36,9 +39,11 @@ import org.archive.structure.Record;
 import org.archive.structure.AOLRecord;
 import org.archive.structure.SogouQRecord2008;
 import org.archive.structure.SogouQRecord2012;
+import org.archive.structure.SogouTDoc;
 import org.archive.util.Language.Lang;
 import org.archive.util.format.StandardFormat;
 import org.archive.util.io.IOText;
+import org.archive.util.pattern.PatternFactory;
 import org.archive.util.tuple.IntStrInt;
 import org.archive.util.tuple.PairComparatorBySecond_Desc;
 import org.archive.util.tuple.StrInt;
@@ -55,6 +60,7 @@ public class ClickThroughAnalyzer {
 	//
 	public static final int STARTID = 1;
 	public static final String TabSeparator = "\t";
+	public static final String NEWLINE = System.getProperty("line.separator");
 	//for session segmentation, i.e., 30 minutes
 	private static final int SessionSegmentationThreshold = 30;
 	//unique files: AOL, SogouQ2008, SogouQ2012
@@ -2563,6 +2569,344 @@ public class ClickThroughAnalyzer {
 		*/		
 	}
 	
+	/**
+	 * Sample queries from SogouQ2012 for Temporalia-2
+	 * **/
+	private static void sampleQueries_Ch(int number){
+		loadUniqueQText(LogVersion.SogouQ2012, "UTF-8");
+		
+		HashSet<String> priorQSet = loadPriorQueries();
+			
+		Random random = new Random();
+		
+		HashSet<Integer> selectedSet = new HashSet<>();
+		ArrayList<IntStrInt> selectedList = new ArrayList<>();
+		
+		System.out.println("Size:\t"+UniqueQTextList.size());
+		int maxIndex = UniqueQTextList.size();		
+		
+		while(selectedSet.size() < number){
+			int index = Math.abs(random.nextInt()%maxIndex);
+			
+			IntStrInt candidate = UniqueQTextList.get(index);
+			
+			int lineID = candidate.getFirst();
+			int fre = candidate.getThird();
+			String rawQ = candidate.getSecond();
+			
+			if(!selectedSet.contains(lineID) && (fre>=5 && fre<=50) && validSample_Ch(rawQ) && !priorQSet.contains(rawQ)){
+				selectedList.add(candidate);
+				selectedSet.add(lineID);
+			}
+		}
+		
+		//output
+		String targetFile = DataDirectory.Bench_Output+"Temporalia2/Ch_Crowdsourcing/SampleQueries_"+Integer.toString(number)+".txt";
+		try {
+			BufferedWriter writer = IOText.getBufferedWriter_UTF8(targetFile);
+			
+			for(IntStrInt element: selectedList){
+				writer.write(element.getThird()+"\t"+element.getSecond());
+				writer.newLine();
+			}
+			
+			writer.flush();
+			writer.close();
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}	
+	}
+	
+	public static Pattern nonDesiredEnglishTextPattern = Pattern.compile("[^a-z0-9A-Z\\s]+");
+	
+	public static boolean containNonDesiredEnText(String str){		
+		Matcher mat = nonDesiredEnglishTextPattern.matcher(str);
+		if(mat.find()){
+			return true;
+		}else{
+			return false;
+		}
+	}
+	
+	private static void sampleQueries_En(){
+		loadUniqueQText(LogVersion.SogouQ2012, "UTF-8");
+		
+		//output
+		String targetFile = DataDirectory.Bench_Output+"Temporalia2/Ch_Crowdsourcing/Query_SogouQ_En_2.txt";
+		
+		try {
+			BufferedWriter writer = IOText.getBufferedWriter_UTF8(targetFile);
+			
+			for(IntStrInt candidate: UniqueQTextList){
+				int lineID = candidate.getFirst();
+				int fre = candidate.getThird();
+				String rawQ = candidate.getSecond();
+				
+				if(validSample_En(rawQ)){
+					writer.write(rawQ);
+					writer.newLine();
+				}				
+			}
+			
+			writer.flush();
+			writer.close();			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		
+		/*
+		int count = 0;
+		for(IntStrInt candidate: UniqueQTextList){
+			int lineID = candidate.getFirst();
+			int fre = candidate.getThird();
+			String rawQ = candidate.getSecond();
+			
+			if(validSample_En(rawQ)){
+				System.out.println(rawQ);
+				count++;
+			}
+		}
+		
+		System.out.println(count);
+		*/
+		
+		/*
+		HashSet<String> priorQSet = loadPriorQueries();
+			
+		Random random = new Random();
+		
+		HashSet<Integer> selectedSet = new HashSet<>();
+		ArrayList<IntStrInt> selectedList = new ArrayList<>();
+		
+		System.out.println("Size:\t"+UniqueQTextList.size());
+		int maxIndex = UniqueQTextList.size();		
+		
+		while(selectedSet.size() < number){
+			int index = Math.abs(random.nextInt()%maxIndex);
+			
+			IntStrInt candidate = UniqueQTextList.get(index);
+			
+			int lineID = candidate.getFirst();
+			int fre = candidate.getThird();
+			String rawQ = candidate.getSecond();
+			
+			if(!selectedSet.contains(lineID) && (fre>=5 && fre<=50) && validSample_Ch(rawQ) && !priorQSet.contains(rawQ)){
+				selectedList.add(candidate);
+				selectedSet.add(lineID);
+			}
+		}
+		
+		//output
+		String targetFile = DataDirectory.Bench_Output+"Temporalia2/Ch_Crowdsourcing/SampleQueries_"+Integer.toString(number)+".txt";
+		try {
+			BufferedWriter writer = IOText.getBufferedWriter_UTF8(targetFile);
+			
+			for(IntStrInt element: selectedList){
+				writer.write(element.getThird()+"\t"+element.getSecond());
+				writer.newLine();
+			}
+			
+			writer.flush();
+			writer.close();
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}	
+		*/
+	}
+	
+	private static HashSet<String> loadPriorQueries(){
+		HashSet<String> priorQSet = new HashSet<>();
+		
+		String file_1 = DataDirectory.Bench_Output+"Temporalia2/Ch_Crowdsourcing/SampleQueries_3000_1.txt";
+		String file_2= DataDirectory.Bench_Output+"Temporalia2/Ch_Crowdsourcing/SampleQueries_5000_2.txt";
+		//System.out.println(file);
+		try {
+			ArrayList<String> lineList_1 = IOText.getLinesAsAList_UTF8(file_1);
+			ArrayList<String> lineList_2 = IOText.getLinesAsAList_UTF8(file_2);
+			
+			ArrayList<ArrayList<String>> totalList = new ArrayList<>();
+			totalList.add(lineList_1);
+			totalList.add(lineList_2);
+			
+			for(ArrayList<String> lineList: totalList){
+				for(String line: lineList){
+					//String [] parts = line.split(" ");
+					int tabIndex = line.indexOf("\t");
+					//String freString = line.substring(0, tabIndex);
+					String elementString = line.substring(tabIndex+1);
+					
+					priorQSet.add(elementString);
+				}
+			}			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		
+		System.out.println("PriorQSet size:\t"+priorQSet.size());
+		
+		return priorQSet;
+	}
+	
+ 	private static boolean validSample_Ch(String rawQ){
+		if(!PatternFactory.containHanCharacter(rawQ)){
+			return false;
+		} else if(rawQ.indexOf(".") >= 0){
+			return false;
+		} else if(rawQ.length() > 10){
+			return false;
+		} else{
+			return true;
+		}
+	}
+ 	
+ 	private static boolean validSample_En(String rawQ){
+		if((!PatternFactory.containHanCharacter(rawQ))
+				&& (rawQ.indexOf("www")<0)
+				&& (rawQ.indexOf("WWW")<0)
+				&& (rawQ.indexOf(".")<0)
+				&& (rawQ.indexOf("+")<0)
+				&& (rawQ.indexOf(":")<0)
+				&& (rawQ.indexOf("http")<0)
+				&& (rawQ.indexOf("/")<0)
+				&& (PatternFactory.containAlphabet(rawQ))
+				&& (rawQ.length()>2)
+				&& (rawQ.indexOf(" ")>=0)
+				&& (rawQ.indexOf(" ")>=0)
+				&& !containNonDesiredEnText(rawQ)){
+			return true;
+		}else{
+			return false;
+		}
+	}
+	
+ 	//generate the data for uploading to Crowdflower
+ 	private static void generateCFData(){
+ 		String dir = "/Users/dryuhaitao/WorkBench/CodeBench/Bench_Output/Temporalia2/Ch_Crowdsourcing/checked/";
+ 		
+ 		try {
+ 			File dirFile = new File(dir);
+ 			File [] files = dirFile.listFiles();
+ 			
+ 			HashSet<String> qSet = new HashSet<>();
+ 			
+ 			for(File file: files){
+ 				ArrayList<String> lineList = IOText.getLinesAsAList_UTF8(file.getAbsolutePath());
+ 				
+ 				for(String line: lineList){
+ 					//String [] parts = line.split(" ");
+					int tabIndex = line.indexOf("\t");
+					//String freString = line.substring(0, tabIndex);
+					String elementString = line.substring(tabIndex+1);
+					
+					qSet.add(elementString);
+ 				}
+ 			}
+ 			
+ 			String outputFile = "/Users/dryuhaitao/WorkBench/CodeBench/Bench_Output/Temporalia2/Ch_Crowdsourcing/CrowdFlowerData/Temporalia2_TID_Ch.txt";
+ 			BufferedWriter writer = IOText.getBufferedWriter_UTF8(outputFile);
+ 			int id = 1;
+ 			for(String q: qSet){
+ 				writer.write((id++)+"\t"+q);
+ 				writer.newLine();
+ 			}
+ 			writer.flush();
+ 			writer.close();
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+		}
+ 	}
+ 	
+ 	
+ 	
+ 	
+ 	/**
+	 * SogouT: some documents are coded with "gb2312", i.e., a subset of GBK
+	 * some documents are encoded with "utf-8"
+	 * this should be considered for later process
+	 * **/
+ 	private static ArrayList<SogouTDoc> loadSogouTDocs(String file){
+		ArrayList<SogouTDoc> sogouTDocList = new ArrayList<SogouTDoc>();
+		
+		try {			
+			//GBK & UTF-8
+			BufferedReader tReader = IOText.getBufferedReader(file, "GBK");
+			
+			String line = null;		
+			SogouTDoc sogouTDoc = null;
+			StringBuffer buffer = new StringBuffer();
+			String docno=null, url = null;
+			
+			while(null != (line=tReader.readLine())){
+				if(line.length() > 0){	
+					if(line.equals("</doc>")){
+						
+						sogouTDoc = new SogouTDoc(docno, url, buffer.toString());
+						sogouTDocList.add(sogouTDoc);					
+						
+					}else if(line.startsWith("<docno>") && line.endsWith("</docno>")){
+						
+						docno = line.substring(7, line.length()-8);
+						buffer.delete(0, buffer.length());
+						
+					}else if(line.startsWith("<url>") && line.endsWith("</url>")){
+						
+						url = line.substring(5, line.length()-6);
+						
+					}else if(line.equals("<doc>")){
+						
+					}else{
+						buffer.append(line+NEWLINE);
+					}									
+				}		
+				
+				//check
+				if(sogouTDocList.size() > 5){
+					break;
+				}
+			}
+			
+			tReader.close();
+			
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		
+		//System.out.println("Count of Loaded Htmls:\t"+htmlDocList.size());
+		//htmlDocList.get(943).sysOutput();
+		//check
+		/*
+		for(SogouTDoc doc: sogouTDocList){
+			doc.sysOutput();
+			System.out.println("-----");
+		}
+		*/
+		return sogouTDocList;
+	}
+
+	private static void load(){
+		try {
+			String file = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/pages.001";
+			BufferedReader reader = IOText.getBufferedReader(file, "GBK");
+			for(int i=0; i<10000; i++){
+				String line = reader.readLine();
+				System.out.println(line);
+			}
+			reader.close();
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+	}
+ 	
+ 	
+	///////////////
 	public static void main(String []args){
 		//ClickThroughAnalyzer.getNumberOfRecordsSogouQ2012();
 		
@@ -2632,7 +2976,7 @@ public class ClickThroughAnalyzer {
 		//Bing log//
 		////////////
 		//1
-		ClickThroughAnalyzer.getStatistics(2);
+		//ClickThroughAnalyzer.getStatistics(2);
 		
 		//2
 		//String file = "C:/T/WorkBench/Corpus/DataSource_Analyzed/FilteredBingOrganicSearchLog_AtLeast_2Click/AcceptedSessionData_AtLeast_2Click.txt";
@@ -2650,6 +2994,29 @@ public class ClickThroughAnalyzer {
 		
 		//6
 		//ClickThroughAnalyzer.checkSuffix();
+		
+		
+		/////
+		//Temporalia-2
+		/////
+		//1
+		//ClickThroughAnalyzer.sampleQueries_Ch(10000);
+		
+		//2
+		//ClickThroughAnalyzer.generateCFData();
+		
+		//3
+		//ClickThroughAnalyzer.sampleQueries_En();
+		
+		
+		////
+		//SogouT
+		//1
+		//ClickThroughAnalyzer.load();
+		
+		//2
+		String file = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/pages.001";
+		ClickThroughAnalyzer.loadSogouTDocs(file);
 		
 	}
 }
