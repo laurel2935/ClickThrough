@@ -7,7 +7,9 @@
 	<classpathentry combineaccessrules="false" kind="src" path="/DivRanking"/>
 	<classpathentry kind="lib" path="/Users/dryuhaitao/WorkBench/CodeBench/JarPool/jar_ClickThroughData/jung2-2_0_1/jung-api-2.0.1.jar"/>
 	<classpathentry kind="lib" path="/Users/dryuhaitao/WorkBench/CodeBench/JarPool/jar_ClickThroughData/jung2-2_0_1/jung-graph-impl-2.0.1.jar"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="lib" path="/Users/dryuhaitao/WorkBench/CodeBench/JarPool/jar_ClickThroughData/collections-generic-4.01.jar"/>
+	<classpathentry kind="lib" path="/Users/dryuhaitao/WorkBench/CodeBench/JarPool/jar_DiversifiedRanking/boilerpipe/boilerpipe-1.2.0.jar"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/Z7"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

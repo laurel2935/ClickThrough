@@ -2,12 +2,15 @@ package org.archive.analysis;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.URL;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -22,6 +25,8 @@ import java.util.Map.Entry;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
+import org.apache.commons.compress.archivers.sevenz.SevenZFile;
 import org.apache.lucene.analysis.tokenattributes.FlagsAttributeImpl;
 import org.apache.lucene.util.Version;
 import org.archive.clickgraph.LogEdge;
@@ -32,6 +37,7 @@ import org.archive.comon.ClickThroughDataVersion;
 import org.archive.comon.ClickThroughDataVersion.ElementType;
 import org.archive.comon.ClickThroughDataVersion.LogVersion;
 import org.archive.comon.DataDirectory;
+import org.archive.nlp.htmlparser.pk.HtmlExtractor;
 import org.archive.nlp.tokenizer.Tokenizer;
 import org.archive.structure.BingQSession1;
 import org.archive.structure.ClickTime;
@@ -39,7 +45,8 @@ import org.archive.structure.Record;
 import org.archive.structure.AOLRecord;
 import org.archive.structure.SogouQRecord2008;
 import org.archive.structure.SogouQRecord2012;
-import org.archive.structure.SogouTDoc;
+import org.archive.structure.SogouTHtml;
+import org.archive.structure.TemporaliaDoc;
 import org.archive.util.Language.Lang;
 import org.archive.util.format.StandardFormat;
 import org.archive.util.io.IOText;
@@ -50,6 +57,9 @@ import org.archive.util.tuple.StrInt;
 import org.archive.util.tuple.StrStrEdge;
 import org.archive.util.tuple.StrStrInt;
 
+import com.sun.xml.internal.bind.v2.model.core.ID;
+
+import de.l3s.boilerpipe.extractors.ArticleExtractor;
 import edu.uci.ics.jung.graph.Graph;
 import edu.uci.ics.jung.graph.UndirectedSparseGraph;
 import edu.uci.ics.jung.graph.util.Pair;
@@ -2831,15 +2841,15 @@ public class ClickThroughAnalyzer {
 	 * some documents are encoded with "utf-8"
 	 * this should be considered for later process
 	 * **/
- 	private static ArrayList<SogouTDoc> loadSogouTDocs(String file){
-		ArrayList<SogouTDoc> sogouTDocList = new ArrayList<SogouTDoc>();
+ 	private static ArrayList<SogouTHtml> loadSogouTDocs(String file){
+		ArrayList<SogouTHtml> sogouTDocList = new ArrayList<SogouTHtml>();
 		
 		try {			
 			//GBK & UTF-8
 			BufferedReader tReader = IOText.getBufferedReader(file, "GBK");
 			
 			String line = null;		
-			SogouTDoc sogouTDoc = null;
+			SogouTHtml sogouTDoc = null;
 			StringBuffer buffer = new StringBuffer();
 			String docno=null, url = null;
 			
@@ -2847,7 +2857,7 @@ public class ClickThroughAnalyzer {
 				if(line.length() > 0){	
 					if(line.equals("</doc>")){
 						
-						sogouTDoc = new SogouTDoc(docno, url, buffer.toString());
+						sogouTDoc = new SogouTHtml(docno, url, buffer.toString());
 						sogouTDocList.add(sogouTDoc);					
 						
 					}else if(line.startsWith("<docno>") && line.endsWith("</docno>")){
@@ -2881,16 +2891,700 @@ public class ClickThroughAnalyzer {
 		//System.out.println("Count of Loaded Htmls:\t"+htmlDocList.size());
 		//htmlDocList.get(943).sysOutput();
 		//check
-		/*
-		for(SogouTDoc doc: sogouTDocList){
+		///*
+		for(SogouTHtml doc: sogouTDocList){
 			doc.sysOutput();
 			System.out.println("-----");
 		}
-		*/
+		//*/
 		return sogouTDocList;
 	}
 
-	private static void load(){
+ 	//test a .7z file
+ 	private static void load7zFile(String zFile){
+ 		try {
+ 			SevenZFile sevenZFile = new SevenZFile(new File(zFile));
+ 			SevenZArchiveEntry sevenZArchiveEntry = null;
+ 			int count = 0;
+ 			
+ 			while((null!=(sevenZFile.getNextEntry()) ) && (count<200) ){
+ 				String name = sevenZArchiveEntry.getName();
+ 				
+ 				if(sevenZArchiveEntry.isDirectory()) {
+ 			        System.out.println(String.format("Found directory entry %s", name));
+ 			    } else {
+ 			        // If this is a file, we read the file content into a 
+ 			        // ByteArrayOutputStream ...
+ 			        System.out.println(String.format("Unpacking %s ...", name));
+ 			        
+ 			        ByteArrayOutputStream contentBytes = new ByteArrayOutputStream();
+
+ 			        // ... using a small buffer byte array.
+ 			        byte[] buffer = new byte[2048];
+ 			        int bytesRead;
+ 			        while((bytesRead = sevenZFile.read(buffer)) != -1) {
+ 			          contentBytes.write(buffer, 0, bytesRead);
+ 			        }
+ 			        // Assuming the content is a UTF-8 text file we can interpret the
+ 			        // bytes as a string.
+ 			        String content = contentBytes.toString("GBK");
+ 			        System.out.println(content);
+ 			    }
+ 			}
+ 			
+ 			sevenZFile.close();
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+ 	}
+ 	
+ 	/**
+ 	 * sogouTDir: unzipped file dir
+ 	 * **/
+ 	//////
+ 	//part-1: extract temporalia doc
+ 	//////
+ 	private static void extractTemporaliaDocFromSogouT(String sogouTDir, String outputDir){
+ 		
+ 		String outFileName = "SogouT_TemNoTag_00000000.xml";
+		
+		File outFile = new File(outputDir, outFileName);
+		BufferedWriter utf8Writer = null;
+		try {
+			utf8Writer = IOText.getBufferedWriter(outFile.getAbsolutePath(), "utf-8");
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}		
+ 		
+ 		ArrayList<File> fileList = new ArrayList<>();
+ 		
+ 		IOText.loadFiles(new File(sogouTDir), fileList);
+ 		
+ 		//buffer list
+ 		ArrayList<SogouTHtml> sogouTHtmlList = new ArrayList<SogouTHtml>();
+ 		
+ 		////
+ 		BufferedReader tReader = null;
+
+ 		String line = null;		
+		SogouTHtml sogouTHtml = null;
+		StringBuffer buffer = new StringBuffer();
+		String docno=null, url = null;
+			
+ 		for(File file: fileList){ 	
+ 			String path = file.getAbsolutePath();
+ 			if(path.endsWith(".7z") || path.indexOf("pages")<=0){
+ 				continue;
+ 			}
+ 			
+ 			try {			
+ 				//GBK & UTF-8
+ 				System.out.println("inputFile:\t"+path);
+ 				tReader = IOText.getBufferedReader(path, "GBK");
+ 				
+ 				while(null != (line=tReader.readLine())){
+ 					if(line.length() > 0){	
+ 						if(line.equals("</doc>")){
+ 							
+ 							sogouTHtml = new SogouTHtml(docno, url, buffer.toString());
+ 							sogouTHtmlList.add(sogouTHtml);					
+ 							
+ 						}else if(line.startsWith("<docno>") && line.endsWith("</docno>")){
+ 							
+ 							docno = line.substring(7, line.length()-8);
+ 							buffer.delete(0, buffer.length());
+ 							
+ 						}else if(line.startsWith("<url>") && line.endsWith("</url>")){
+ 							
+ 							url = line.substring(5, line.length()-6);
+ 							
+ 						}else if(line.equals("<doc>")){
+ 							
+ 						}else{
+ 							buffer.append(line+NEWLINE);
+ 						}									
+ 					}		
+ 					
+ 					//output per 50000
+ 					//System.out.println(sogouTHtmlList.size());
+ 					if(sogouTHtmlList.size() == 100){
+ 						int nullCount = 0;
+ 						for(SogouTHtml tHtml: sogouTHtmlList){
+ 							TemporaliaDoc temporaliaDoc = convert(tHtml); 							
+ 							
+ 							if(null != temporaliaDoc){
+ 								temporaliaDoc.sysOutput();
+ 								//outputTemporaliaDoc(outputDir, temporaliaDoc, utf8Writer);
+ 							}else{
+ 								//System.out.println((++nullCount));
+ 							}
+ 						}
+ 						//
+ 						sogouTHtmlList.clear();
+ 						return;
+ 					}
+ 				}
+ 				
+ 				tReader.close();
+ 				tReader = null; 				
+ 			} catch (Exception e) {
+ 				e.printStackTrace();
+ 			}
+ 		} 	
+ 		
+ 		//finally
+ 		try {
+ 			utf8Writer.flush();
+ 	 		utf8Writer.close();
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		} 		
+ 	}
+ 	//
+ 	private static HtmlExtractor htmlExtractor = new HtmlExtractor();
+
+ 	//	//	/20120311/	or /2012324/	or	/201233/
+	private static  String convertDate_4(String rawStr) {
+		
+		String dateStr = rawStr.substring(1, rawStr.length()-1);
+		
+		String yearStr = null;
+		String monStr = null;
+		String dayStr = null;
+		
+		if(dateStr.length() == 6){
+			yearStr = dateStr.substring(0, 4);
+			monStr = dateStr.substring(4, 5);
+			dayStr = dateStr.substring(5, 6);
+		}else if(dateStr.length() == 7){
+			yearStr = dateStr.substring(0, 4);
+			monStr = dateStr.substring(4, 5);
+			dayStr = dateStr.substring(5, 7);
+		}else if(dateStr.length() == 8){
+			yearStr = dateStr.substring(0, 4);
+			monStr = dateStr.substring(4, 6);
+			dayStr = dateStr.substring(6, 8);
+		}
+		
+		/*
+		if(2012 != Integer.parseInt(yearStr)){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<6 || monInt>7){
+				return null;
+			}else{
+				return yearStr+"-"+monStr+"-"+dayStr;
+			}
+		}	
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}		
+	}
+	//	/12/0702/
+	private static  String convertDate_1(String rawStr) {
+		
+		//String yearStr = "2012";
+		String yearStr = rawStr.substring(1, 3);
+		yearStr = "20"+yearStr;
+		String monStr = rawStr.substring(4, 6);
+		String dayStr = rawStr.substring(6, 8);
+		
+		/*
+		int monInt = Integer.parseInt(monStr);
+		if(monInt<6 || monInt>7){
+			return null;
+		}else{
+			return yearStr+"-"+monStr+"-"+dayStr;
+		}
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}
+	}
+	//	/2012/06/11/
+	private static  String convertDate_2(String rawStr) {
+		
+		String yearStr = rawStr.substring(1, 5);
+		String monStr = rawStr.substring(6, 8);
+		String dayStr = rawStr.substring(9, 11);
+		
+		/*
+		if(2012 != Integer.parseInt(yearStr)){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<6 || monInt>7){
+				return null;
+			}else{
+				return yearStr+"-"+monStr+"-"+dayStr;
+			}
+		}
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}
+	}
+	//	/2012/0311/
+	private static  String convertDate_3(String rawStr) {
+		
+		String yearStr = rawStr.substring(1, 5);
+		String monStr = rawStr.substring(6, 8);
+		String dayStr = rawStr.substring(8, 10);
+		
+		/*
+		if(2012 != Integer.parseInt(yearStr)){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<6 || monInt>7){
+				return null;
+			}else{
+				return yearStr+"-"+monStr+"-"+dayStr;
+			}
+		}	
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}
+	}
+	//	detail_2012_06/12/
+	private static  String convertDate_5(String rawStr) {
+		
+		String yearStr = rawStr.substring(7, 11);
+		String monStr = rawStr.substring(12, 14);
+		String dayStr = rawStr.substring(15, 17);
+		
+		/*
+		if(2012 != Integer.parseInt(yearStr)){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<6 || monInt>7){
+				return null;
+			}else{
+				return yearStr+"-"+monStr+"-"+dayStr;
+			}
+		}	
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}
+	}
+	//	20120611.html
+	private static  String convertDate_6(String rawStr) {
+		String dateStr = rawStr.substring(0, rawStr.length()-1);
+		
+		String yearStr = dateStr.substring(0, 4);
+		String monStr = dateStr.substring(4, 6);
+		String dayStr = dateStr.substring(6, 8);
+		
+		/*
+		if(2012 != Integer.parseInt(yearStr)){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<6 || monInt>7){
+				return null;
+			}else{
+				return yearStr+"-"+monStr+"-"+dayStr;
+			}
+		}
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}
+	}
+	//
+	private static  String convertDate_7(String rawStr) {
+		rawStr = rawStr.substring(1);
+		String [] parts = rawStr.split("-");
+		String yearStr = parts[0];
+		String monStr = parts[1];
+		String dayStr = parts[2];
+		
+		/*
+		if(2012 != Integer.parseInt(yearStr)){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<6 || monInt>7){
+				return null;
+			}else{
+				return yearStr+"-"+monStr+"-"+dayStr;
+			}
+		}
+		*/
+		if(!yearStr.startsWith("20")){
+			return null;
+		}else{
+			int monInt = Integer.parseInt(monStr);
+			if(monInt<1 || monInt>12){
+				return null;
+			}else {
+				int dayInt = Integer.parseInt(dayStr);
+				if(dayInt<1 || dayInt>31){
+					return null;
+				}else{
+					return yearStr+"-"+monStr+"-"+dayStr;
+				}
+			}
+		}
+	}
+	//extract meta data given a html source file
+	public static String extractTitleByPattern(String htmlStr){
+		Matcher matcher = titlePattern.matcher(htmlStr);
+		
+		if(matcher.find()){
+			String matStr = matcher.group();
+			return matStr.substring(matStr.indexOf(">")+1, matStr.length()-8);
+		}else{
+			return null;
+		}
+	}
+	//
+	public static boolean isUTF8(String htmlStr){
+		String [] parts = htmlStr.split(NEWLINE);
+		
+		for(String line: parts){
+			if(line.indexOf("meta")>=0 && line.indexOf("charset=")>=0){
+				line = line.toLowerCase();
+				if(line.indexOf("utf") >= 0){
+					return true;
+				}else{
+					return false;
+				}
+			}
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * for meta-info processing
+	 * **/
+	// patterns used for extracting date from url
+	//	/12/0702/
+	private static Pattern publicationDate_1 = Pattern.compile("/[0-9]{1,2}/[0-9]{4}/"); 
+	//	/20120311/	or /2012324/	or	/201233/
+	private static Pattern publicationDate_4 = Pattern.compile("/[0-9]{6,8}/"); 
+	//	/2012/03/11/
+	private static Pattern publicationDate_2 = Pattern.compile("/[0-9]{4}/[0-9]{2}/[0-9]{2}/"); 
+	//	/2012/0311/
+	private static Pattern publicationDate_3 = Pattern.compile("/[0-9]{4}/[0-9]{4}/"); 
+	//detail_2012_06/12/
+	private static Pattern publicationDate_5 = Pattern.compile("detail_[0-9]{4}_[0-9]{2}/[0-9]{2}/"); 
+	//20120611.html
+	private static Pattern publicationDate_6 = Pattern.compile("20[0-9]{6}.");
+	//2011-10-18
+	private static Pattern publicationDate_7 = Pattern.compile("/[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}");
+ 	
+	//for extracting the title segment
+	private static Pattern titlePattern = Pattern.compile("<title(.*?)/title>");
+	//
+	private static TemporaliaDoc convert(SogouTHtml sogouTHtml){ 		
+ 		
+ 		String url = sogouTHtml.getUrl(); 		
+ 		//for host
+		int index = url.indexOf("://");
+		String host = url.substring(index+3);
+		host = url.substring(0, index+3+host.indexOf("/"));
+		//for publication date			
+		Matcher matcher_1 = publicationDate_1.matcher(url);
+		Matcher matcher_2 = publicationDate_2.matcher(url);
+		Matcher matcher_3 = publicationDate_3.matcher(url);
+		Matcher matcher_4 = publicationDate_4.matcher(url);
+		Matcher matcher_5 = publicationDate_5.matcher(url);
+		Matcher matcher_6 = publicationDate_6.matcher(url);
+		Matcher matcher_7 = publicationDate_7.matcher(url);
+		
+		String dateStr = null;
+		
+		try {
+			if(matcher_1.find()){
+				dateStr = matcher_1.group();
+				dateStr = convertDate_1(dateStr);
+			}else if(matcher_2.find()){
+				dateStr = matcher_2.group();
+				dateStr = convertDate_2(dateStr);
+			}else if(matcher_3.find()){
+				dateStr = matcher_3.group();
+				dateStr = convertDate_3(dateStr);
+			}else if(matcher_4.find()){
+				dateStr = matcher_4.group();
+				dateStr = convertDate_4(dateStr);
+			}else if(matcher_5.find()){
+				dateStr = matcher_5.group();
+				dateStr = convertDate_5(dateStr);
+			}else if(matcher_6.find()){
+				dateStr = matcher_6.group();
+				dateStr = convertDate_6(dateStr);
+			}else if(matcher_7.find()){
+				dateStr = matcher_7.group();
+				dateStr = convertDate_7(dateStr);
+			}
+		} catch (Exception e) {
+			// TODO: handle exception
+			//e.printStackTrace();
+			dateStr = null;
+		}
+		
+		
+		//check-1
+		if(null == dateStr){
+			return null;
+		}
+		
+		//encoding convert
+		String htmlStr = sogouTHtml.getHtmlStr();
+		BufferedReader br = null;
+		//byte [] array = null;
+		try {
+			if(isUTF8(htmlStr)){				
+				byte [] array = htmlStr.getBytes("GBK");
+				htmlStr = new String(array, "UTF-8");	
+				
+				br = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(htmlStr.getBytes("UTF-8"))));
+			}else{
+				br = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(htmlStr.getBytes("GBK"))));
+			}
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}			
+		
+		//title
+		String title = extractTitleByPattern(htmlStr);
+		//check-2
+		if(null == title){
+			//return null;
+		}
+		
+		//text
+		String text = null;
+		try {
+			//method-1
+			///*
+			StringBuffer sBuffer = htmlExtractor.htmlToText(br);
+			if(null == sBuffer){
+				//return null;
+			}else{
+				text = sBuffer.toString();
+				if(text.length() < 30){
+					///return null;
+				}
+			}	
+			//*/
+			//method-2
+			text = ArticleExtractor.INSTANCE.getText(htmlStr).trim();
+			/**
+			 * String str="[\u3002\uff1b\uff0c\uff1a\u201c\u201d\uff08\uff09\u3001\uff1f\u300a\u300b]"
+			 * for recognizing ： 。 ；  ， ： “ ”（ ） 、 ？ 《 》 
+			 * **/
+			if(null != text){
+				text = text.replaceAll("[^０１２３４５６７８９a-z0-9A-Z\u4E00-\u9FFF\u3002\uff1b\uff0c\uff1a\u201c\u201d\uff08\uff09\u3001\uff1f\u300a\u300b]+", "");
+			}
+		} catch (Exception e) {
+			System.err.println("extract error!");
+		}
+		
+		return new TemporaliaDoc(sogouTHtml.getDocNo(), host, dateStr, url, title, text);		
+ 	}
+	//private static BufferedWriter utf8Writer = null;
+	private static int totalAcceptedDoc;
+	private static int acceptedDocPer7z = 0;
+	private static final int docPerFile = 50000;
+	private static final DecimalFormat df = new DecimalFormat("00000000");
+	
+	/*
+	private static void outputTemporaliaDoc(String outputDir, TemporaliaDoc temDoc, BufferedWriter utf8Writer){	
+		
+		try {			
+			if(0 == acceptedDoc % docPerFile){			
+				try {
+					if(acceptedDoc > 0){
+						utf8Writer.flush();
+						utf8Writer.close();
+						utf8Writer = null;
+						
+						//
+						int k = acceptedDoc/docPerFile;
+						String suffix = df.format(k);
+						
+						String outFileName = "SogouT_TemNoTag_"+suffix+".xml";
+						
+						File outFile = new File(outputDir, outFileName);
+						utf8Writer = IOText.getBufferedWriter(outFile.getAbsolutePath(), "utf-8");
+					}
+					
+					
+				} catch (Exception e) {
+					// TODO: handle exception
+					e.printStackTrace();
+				}
+			}
+			
+			String text = temDoc._text;			
+		
+			if(null!=text && text.length()>0){			
+				
+				//acceptedDoc++;			
+				
+				utf8Writer.write("<doc id=\""+temDoc._docno+"\">");
+				utf8Writer.newLine();
+				utf8Writer.write("<meta-info>");
+				utf8Writer.newLine();
+				utf8Writer.write("<tag name=\"host\">"+temDoc._host+"</tag>");
+				utf8Writer.newLine();
+				utf8Writer.write("<tag name=\"date\">"+temDoc._dateStr+"</tag>");
+				utf8Writer.newLine();
+				utf8Writer.write("<tag name=\"url\">"+temDoc._url+"</tag>");
+				utf8Writer.newLine();
+				utf8Writer.write("<tag name=\"title\">"+temDoc._title+"</tag>");
+				utf8Writer.newLine();
+				utf8Writer.write("<tag name=\"source-encoding\">UTF-8</tag>");
+				utf8Writer.newLine();
+				utf8Writer.write("</meta-info>");
+				utf8Writer.newLine();
+				utf8Writer.write("<text>");
+				utf8Writer.newLine();
+				utf8Writer.write(text);
+				utf8Writer.newLine();
+				utf8Writer.write("</text>");
+				utf8Writer.newLine();
+				utf8Writer.write("</doc>");
+				utf8Writer.newLine();				
+			}
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}		
+	}
+	*/
+ 	
+	public static void getDateStr(String url){	
+ 		//for host
+		int index = url.indexOf("://");
+		String host = url.substring(index+3);
+		host = url.substring(0, index+3+host.indexOf("/"));
+		//for publication date			
+		Matcher matcher_1 = publicationDate_1.matcher(url);
+		Matcher matcher_2 = publicationDate_2.matcher(url);
+		Matcher matcher_3 = publicationDate_3.matcher(url);
+		Matcher matcher_4 = publicationDate_4.matcher(url);
+		Matcher matcher_5 = publicationDate_5.matcher(url);
+		Matcher matcher_6 = publicationDate_6.matcher(url);
+		Matcher matcher_7 = publicationDate_7.matcher(url);
+		
+		String dateStr = null;
+		
+		if(matcher_1.find()){
+			dateStr = matcher_1.group();
+			dateStr = convertDate_1(dateStr);
+		}else if(matcher_2.find()){
+			dateStr = matcher_2.group();
+			dateStr = convertDate_2(dateStr);
+		}else if(matcher_3.find()){
+			dateStr = matcher_3.group();
+			dateStr = convertDate_3(dateStr);
+		}else if(matcher_4.find()){
+			dateStr = matcher_4.group();
+			dateStr = convertDate_4(dateStr);
+		}else if(matcher_5.find()){
+			dateStr = matcher_5.group();
+			dateStr = convertDate_5(dateStr);
+		}else if(matcher_6.find()){
+			dateStr = matcher_6.group();
+			dateStr = convertDate_6(dateStr);
+		}else if(matcher_7.find()){
+			dateStr = matcher_7.group();
+			dateStr = convertDate_7(dateStr);
+		}
+		
+		System.out.println(url);
+		System.out.println(host);
+		System.out.println(dateStr);
+		
+	}
+ 	
+ 	private static void load(){
 		try {
 			String file = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/pages.001";
 			BufferedReader reader = IOText.getBufferedReader(file, "GBK");
@@ -2905,9 +3599,252 @@ public class ClickThroughAnalyzer {
 		}
 	}
  	
+ 	//////
+ 	//part-2 extract dated html
+ 	//////
+ 	private static BufferedWriter datedHtmlWriter = null;
+ 	private static String inputEncoding = "GBK";
+ 	private static String outputEncoding = "UTF-8";
+ 	//private static int serialID = 0;
  	
+ 	private static void extractDatedHtmlFromSogouT(String sogouTDir, String outputDir){ 		
+ 		ArrayList<File> fileList = new ArrayList<>();
+ 		
+ 		IOText.loadFiles(new File(sogouTDir), fileList);
+ 		Collections.sort(fileList);
+ 		
+ 		//buffer list
+ 		ArrayList<SogouTHtml> sogouTHtmlList = new ArrayList<SogouTHtml>();
+ 		
+ 		////
+ 		BufferedReader tReader = null;
+ 		String line = null;		
+		SogouTHtml sogouTHtml = null;
+		StringBuffer buffer = new StringBuffer();
+		String docno=null, url = null;
+		String z7Num = null;	
+ 		for(File file: fileList){ 	
+ 			String path = file.getAbsolutePath();
+ 			if(path.endsWith(".7z") || path.indexOf("pages")<=0){
+ 				continue;
+ 			}else{
+ 				z7Num = path.substring(path.indexOf(".")+1);
+ 				String outFileName = "SogouT_DatedHtml_"+z7Num+"_00000000";
+ 				File outFile = new File(outputDir, outFileName);
+ 				if(outFile.exists()){
+ 					continue;
+ 				}
+ 				//
+ 		 		try {
+ 		 			if(null != datedHtmlWriter){
+ 		 				totalAcceptedDoc += acceptedDocPer7z;
+ 		 				acceptedDocPer7z = 0;
+ 		 				
+ 		 				datedHtmlWriter.flush();
+ 		 				datedHtmlWriter = null;
+ 		 			}
+ 					datedHtmlWriter = IOText.getBufferedWriter(outFile.getAbsolutePath(), outputEncoding);
+ 				} catch (Exception e) {
+ 					// TODO: handle exception
+ 					e.printStackTrace();
+ 				}	
+ 			}
+ 			
+ 			try {			
+ 				//GBK & UTF-8
+ 				System.out.println("inputFile:\t"+path);
+ 				tReader = IOText.getBufferedReader(path, inputEncoding);
+ 				
+ 				while(null != (line=tReader.readLine())){
+ 					if(line.length() > 0){	
+ 						if(line.equals("</doc>")){
+ 							
+ 							sogouTHtml = new SogouTHtml(docno, url, buffer.toString());
+ 							sogouTHtmlList.add(sogouTHtml);					
+ 							
+ 						}else if(line.startsWith("<docno>") && line.endsWith("</docno>")){
+ 							
+ 							docno = line.substring(7, line.length()-8);
+ 							buffer.delete(0, buffer.length());
+ 							
+ 						}else if(line.startsWith("<url>") && line.endsWith("</url>")){
+ 							
+ 							url = line.substring(5, line.length()-6);
+ 							
+ 						}else if(line.equals("<doc>")){
+ 							
+ 						}else{
+ 							buffer.append(line+NEWLINE);
+ 						}									
+ 					}		
+ 					
+ 					//output per 50000
+ 					//System.out.println(sogouTHtmlList.size());
+ 					if(sogouTHtmlList.size() == 1000){
+ 						
+ 						boolean adjust = !(inputEncoding.equals(outputEncoding));
+ 						for(SogouTHtml tHtml: sogouTHtmlList){
+ 							SogouTHtml newSogouTHtml = acceptAndAdjust(tHtml, adjust);				
+ 							
+ 							if(null != newSogouTHtml){ 								
+ 								outputDatedHtml(outputDir, newSogouTHtml, z7Num);
+ 							}
+ 						}
+ 						//
+ 						sogouTHtmlList.clear();
+ 						//return;
+ 					}
+ 				}
+ 				
+ 				tReader.close();
+ 				tReader = null; 				
+ 			} catch (Exception e) {
+ 				e.printStackTrace();
+ 			}
+ 			
+ 			//test per file
+ 			//break;
+ 		} 	
+ 		
+ 		//finally
+ 		try {
+ 			totalAcceptedDoc += acceptedDocPer7z;
+ 			datedHtmlWriter.flush();
+ 			datedHtmlWriter.close();
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		} 
+ 		//statistics
+ 		System.out.println("Accepted number of documents:\t"+totalAcceptedDoc);
+ 	}
+
+	private static SogouTHtml acceptAndAdjust(SogouTHtml sogouTHtml, boolean adjust){
+		String url = sogouTHtml.getUrl(); 		
+ 		//for host
+		//int index = url.indexOf("://");
+		//String host = url.substring(index+3);
+		//host = url.substring(0, index+3+host.indexOf("/"));
+		//for publication date			
+		Matcher matcher_1 = publicationDate_1.matcher(url);
+		Matcher matcher_2 = publicationDate_2.matcher(url);
+		Matcher matcher_3 = publicationDate_3.matcher(url);
+		Matcher matcher_4 = publicationDate_4.matcher(url);
+		Matcher matcher_5 = publicationDate_5.matcher(url);
+		Matcher matcher_6 = publicationDate_6.matcher(url);
+		Matcher matcher_7 = publicationDate_7.matcher(url);
+		
+		String dateStr = null;		
+		try {
+			if(matcher_1.find()){
+				dateStr = matcher_1.group();
+				dateStr = convertDate_1(dateStr);
+			}else if(matcher_2.find()){
+				dateStr = matcher_2.group();
+				dateStr = convertDate_2(dateStr);
+			}else if(matcher_3.find()){
+				dateStr = matcher_3.group();
+				dateStr = convertDate_3(dateStr);
+			}else if(matcher_4.find()){
+				dateStr = matcher_4.group();
+				dateStr = convertDate_4(dateStr);
+			}else if(matcher_5.find()){
+				dateStr = matcher_5.group();
+				dateStr = convertDate_5(dateStr);
+			}else if(matcher_6.find()){
+				dateStr = matcher_6.group();
+				dateStr = convertDate_6(dateStr);
+			}else if(matcher_7.find()){
+				dateStr = matcher_7.group();
+				dateStr = convertDate_7(dateStr);
+			}
+		} catch (Exception e) {
+			// TODO: handle exception
+			//e.printStackTrace();
+			dateStr = null;
+		}
+		
+		//check-1
+		if(null == dateStr){
+			return null;
+		}
+		
+		sogouTHtml._date = dateStr;
+		
+		//check-2
+		if(adjust){
+			String htmlStr = sogouTHtml.getHtmlStr();
+			try {				
+				if(isUTF8(htmlStr)){				
+					byte [] array = htmlStr.getBytes("GBK");
+					htmlStr = new String(array, "UTF-8");
+					sogouTHtml._htmlStr = htmlStr;
+				}
+			}catch(Exception e){
+				return null;
+			}
+		}		
+		
+		return sogouTHtml;
+	}
+ 	
+	private static void outputDatedHtml(String outputDir, SogouTHtml sogouTHtml, String z7Num){	
+		
+		try {			
+			if(0 == acceptedDocPer7z % docPerFile){
+				//System.out.println(z7Num+": "+acceptedDocPer7z);
+				try {
+					if(acceptedDocPer7z > 0){
+						datedHtmlWriter.flush();
+						datedHtmlWriter.close();
+						datedHtmlWriter = null;
+						
+						//
+						int k = acceptedDocPer7z/docPerFile;
+						String suffix = df.format(k);
+						
+						String outFileName = "SogouT_DatedHtml_"+z7Num+"_"+suffix;
+						
+						File outFile = new File(outputDir, outFileName);
+						datedHtmlWriter = IOText.getBufferedWriter(outFile.getAbsolutePath(), outputEncoding);
+					}
+					
+					/*
+					int k = acceptedDoc/docPerFile;
+					String suffix = df.format(k);
+					
+					String outFileName = "SogouCA_TemNoTag_"+suffix+".xml";
+					
+					File outFile = new File(outputDir, outFileName);
+					utf8Writer = IOText.getBufferedWriter(outFile.getAbsolutePath(), "utf-8");
+					*/
+				} catch (Exception e) {
+					// TODO: handle exception
+					e.printStackTrace();
+				}
+			}		
+		
+			if(null!=sogouTHtml._date && sogouTHtml._htmlStr.length()>0){			
+				
+				acceptedDocPer7z++;	
+				
+				datedHtmlWriter.write("<doc>"+NEWLINE);
+				datedHtmlWriter.write("<docno>"+sogouTHtml._docno+"</docno>"+NEWLINE);
+				datedHtmlWriter.write("<date>" +sogouTHtml._date +"</date>"+NEWLINE);
+				datedHtmlWriter.write("<url>"  +sogouTHtml._url  +"</url>"+NEWLINE);
+				datedHtmlWriter.write(sogouTHtml._htmlStr.trim()+NEWLINE);
+				datedHtmlWriter.write("</doc>"+NEWLINE);	
+			}
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}		
+	}
 	///////////////
-	public static void main(String []args){
+	
+ 	/////////
+ 	public static void main(String []args){
 		//ClickThroughAnalyzer.getNumberOfRecordsSogouQ2012();
 		
 		/** get ordered files **/
@@ -3015,8 +3952,56 @@ public class ClickThroughAnalyzer {
 		//ClickThroughAnalyzer.load();
 		
 		//2
-		String file = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/pages.001";
-		ClickThroughAnalyzer.loadSogouTDocs(file);
+		//String file = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/pages.001";
+		//ClickThroughAnalyzer.loadSogouTDocs(file);
+ 		
+ 		//3
+ 		/*
+ 		String inputDir = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/";
+ 		String outputDir = "/Users/dryuhaitao/WorkBench/Corpus/SogouT/ForTemporaliaUsage/NoTagVersion/";
+ 		ClickThroughAnalyzer.extractTemporaliaDocFromSogouT(inputDir, outputDir);
+ 		*/
+ 		
+ 		//4
+ 		/*
+ 		String url1= "http://www.yajiaprint.com/a/2011747/news775.html";
+ 		String url2 = "http://www.5i.tv/shanghai/channel/show/id/876/date/2011-10-18";
+ 		String url3 = "http://www.beijingww.com/1470/2008/11/10/229@71497.htm";
+ 		
+ 		ClickThroughAnalyzer.getDateStr(url1);
+ 		ClickThroughAnalyzer.getDateStr(url2);
+ 		ClickThroughAnalyzer.getDateStr(url3);
+ 		*/
+ 		
+ 		//5 get dated html files
+ 		///*
+ 		//test
+ 		//String inputDir = "/Users/dryuhaitao/WorkBench/Corpus/DataSource_Raw/SogouT_Sample/";
+ 		//using server
+ 		String inputDir = "/Volumes/haitao/8-NTCIR/SogouT/";
+ 		String outputDir = "/Users/dryuhaitao/WorkBench/Corpus/SogouT/ForTemporaliaUsage/DatedHtml/";
+ 		ClickThroughAnalyzer.extractDatedHtmlFromSogouT(inputDir, outputDir);
+ 		//*/
+ 		
+ 		//6
+ 		//String zipFile = "/Volumes/新加卷/SogouT/pages.001.7z";
+ 		//String zipFile = "/Volumes/haitao/8-NTCIR/SogouT/pages.001.7z";
+ 		/*
+ 		
+ 		try {
+			File file = new File(zipFile);
+			if(file.isDirectory()){
+				
+			}else{
+				System.out.println(file.getAbsolutePath());
+			}
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+ 		*/
+ 		//ClickThroughAnalyzer.load7zFile(zipFile);
 		
 	}
 }
